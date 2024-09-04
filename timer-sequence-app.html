@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timer Sequence Application</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 200px;
+        }
+        .timer {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .timer-ring {
+            width: 200px;
+            height: 200px;
+            display: inline-block;
+            position: relative;
+        }
+        .timer-circle {
+            fill: none;
+            stroke: #e0e0e0;
+            stroke-width: 10;
+        }
+        .timer-progress {
+            fill: none;
+            stroke: #2196F3;
+            stroke-width: 10;
+            stroke-linecap: round;
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+            transition: stroke-dashoffset 0.1s linear;
+        }
+        .timer-display {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+        }
+        button {
+            margin: 5px;
+        }
+        #saved-series {
+            margin-top: 20px;
+        }
+        .series-item {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        #section-one {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Timer Sequence Application</h1>
+    <div id="create-series">
+        <div id="section-one">
+            <label for="series-name">Series Name:</label>
+            <input type="text" id="series-name">
+        </div>
+        <div id="timers"></div>
+        <button id="add-timer">Add Timer</button>
+        <button id="save-series">Save Series</button>
+    </div>
+    <div id="saved-series"></div>
+    <div id="active-series" style="display: none;">
+        <h2 id="active-series-name"></h2>
+        <h3 id="active-timer-name"></h3>
+        <div class="timer">
+            <div class="timer-ring">
+                <svg width="200" height="200">
+                    <circle class="timer-circle" cx="100" cy="100" r="95"></circle>
+                    <circle class="timer-progress" cx="100" cy="100" r="95"></circle>
+                </svg>
+                <div class="timer-display">00:00</div>
+            </div>
+        </div>
+        <button id="pause">Pause</button>
+        <button id="resume" style="display:none;">Resume</button>
+        <div id="total-time"></div>
+    </div>
+
+    <script>
+        let timers = [];
+        let savedSeries = [];
+        let currentTimerIndex = 0;
+        let isRunning = false;
+        let intervalId;
+        let totalElapsedTime = 0;
+        let totalDuration = 0;
+        let activeSeries = null;
+
+        const addTimerBtn = document.getElementById('add-timer');
+        const saveSeriesBtn = document.getElementById('save-series');
+        const pauseBtn = document.getElementById('pause');
+        const resumeBtn = document.getElementById('resume');
+        const timersContainer = document.getElementById('timers');
+        const savedSeriesContainer = document.getElementById('saved-series');
+        const activeSeriesContainer = document.getElementById('active-series');
+        const activeSeriesName = document.getElementById('active-series-name');
+        const activeTimerName = document.getElementById('active-timer-name');
+        const totalTimeDisplay = document.getElementById('total-time');
+        const timerDisplay = document.querySelector('.timer-display');
+        const timerProgress = document.querySelector('.timer-progress');
+
+        addTimerBtn.addEventListener('click', addTimer);
+        saveSeriesBtn.addEventListener('click', saveSeries);
+        pauseBtn.addEventListener('click', pauseTimers);
+        resumeBtn.addEventListener('click', resumeTimers);
+
+        function addTimer() {
+            const timerIndex = timers.length;
+            const timerHtml = `
+                <div class="timer-input">
+                    <input type="text" placeholder="Timer Name" class="timer-name">
+                    <input type="number" placeholder="Duration (seconds)" class="timer-duration">
+                </div>
+            `;
+            timersContainer.insertAdjacentHTML('beforeend', timerHtml);
+            timers.push({ elapsed: 0 });
+        }
+
+        function saveSeries() {
+            const seriesName = document.getElementById('series-name').value;
+            if (!seriesName) {
+                alert('Please enter a series name');
+                return;
+            }
+            const series = {
+                name: seriesName,
+                timers: timers.map((timer, index) => {
+                    const timerElement = document.querySelector(`#timers .timer-input:nth-child(${index + 1})`);
+                    return {
+                        name: timerElement.querySelector('.timer-name').value,
+                        duration: parseInt(timerElement.querySelector('.timer-duration').value || 0)
+                    };
+                })
+            };
+            savedSeries.push(series);
+            displaySavedSeries();
+            resetCreateSeriesForm();
+        }
+
+        function displaySavedSeries() {
+            savedSeriesContainer.innerHTML = '<h2>Saved Series</h2>';
+            savedSeries.forEach((series, index) => {
+                const seriesHtml = `
+                    <div class="series-item">
+                        <h3>${series.name}</h3>
+                        <p>${series.timers.length} timers</p>
+                        <button onclick="playSeries(${index})">Play</button>
+                    </div>
+                `;
+                savedSeriesContainer.insertAdjacentHTML('beforeend', seriesHtml);
+            });
+        }
+
+        function resetCreateSeriesForm() {
+            document.getElementById('series-name').value = '';
+            timersContainer.innerHTML = '';
+            timers = [];
+        }
+
+        function playSeries(index) {
+            activeSeries = savedSeries[index];
+            activeSeriesName.textContent = activeSeries.name;
+            activeSeriesContainer.style.display = 'block';
+            document.getElementById('create-series').style.display = 'none';
+            savedSeriesContainer.style.display = 'none';
+            
+            currentTimerIndex = 0;
+            totalElapsedTime = 0;
+            totalDuration = activeSeries.timers.reduce((sum, timer) => sum + timer.duration, 0);
+            
+            startTimer();
+        }
+
+        function startTimer() {
+            if (currentTimerIndex >= activeSeries.timers.length) {
+                finishSeries();
+                return;
+            }
+
+            const currentTimer = activeSeries.timers[currentTimerIndex];
+            activeTimerName.textContent = currentTimer.name;
+            
+            isRunning = true;
+            pauseBtn.disabled = false;
+            
+            runTimer();
+        }
+
+        function runTimer() {
+            clearInterval(intervalId);
+            intervalId = setInterval(() => {
+                const currentTimer = activeSeries.timers[currentTimerIndex];
+                currentTimer.elapsed = (currentTimer.elapsed || 0) + 1;
+                totalElapsedTime++;
+
+                updateTimerDisplay(currentTimer.elapsed, currentTimer.duration);
+                updateTotalTimeDisplay();
+
+                if (currentTimer.elapsed >= currentTimer.duration) {
+                    currentTimerIndex++;
+                    startTimer();
+                }
+            }, 1000);
+        }
+
+        function pauseTimers() {
+            clearInterval(intervalId);
+            isRunning = false;
+            pauseBtn.style.display = 'none';
+            resumeBtn.style.display = 'inline';
+        }
+
+        function resumeTimers() {
+            isRunning = true;
+            runTimer();
+            resumeBtn.style.display = 'none';
+            pauseBtn.style.display = 'inline';
+        }
+
+        function updateTimerDisplay(elapsed, duration) {
+            timerDisplay.textContent = `${formatTime(elapsed)}`;
+            const circumference = 2 * Math.PI * 95;
+            const progress = 1 - (elapsed / duration);
+            const dashoffset = circumference * progress;
+            timerProgress.style.strokeDasharray = circumference;
+            timerProgress.style.strokeDashoffset = dashoffset;
+        }
+
+        function updateTotalTimeDisplay() {
+            totalTimeDisplay.textContent = `Total Time: ${formatTime(totalElapsedTime)} / ${formatTime(totalDuration)}`;
+        }
+
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+        }
+
+        function finishSeries() {
+            clearInterval(intervalId);
+            isRunning = false;
+            pauseBtn.disabled = true;
+            resumeBtn.style.display = 'none';
+            pauseBtn.style.display = 'inline';
+            activeTimerName.textContent = 'Series Completed!';
+        }
+
+        // Initialize with one timer
+        addTimer();
+    </script>
+</body>
+</html>
